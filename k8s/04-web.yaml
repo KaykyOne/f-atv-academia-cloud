@@ -1,0 +1,90 @@
+# Deployment da aplicação: o ReplicaSet criado por ele mantém 2 Pods; se um Pod
+# morrer, outro é criado (autorrecuperação). O Service balanceia só entre Pods "Ready".
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: academia-web
+  namespace: academia-cloud
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: academia-web}
+  strategy:
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}   # atualização sem derrubar capacidade
+  template:
+    metadata:
+      labels: {app: academia-web}
+    spec:
+      # Espalha as réplicas entre zonas quando o cluster tiver nós em mais de uma zona.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: {matchLabels: {app: academia-web}}
+      securityContext: {runAsNonRoot: true, runAsUser: 10001}
+      containers:
+        - name: web
+          image: academia-cloud:2.0
+          ports: [{containerPort: 8000}]
+          envFrom: [{configMapRef: {name: academia-config}}]
+          env:
+            - {name: DB_USER, valueFrom: {secretKeyRef: {name: academia-secrets, key: APP_DB_USER}}}
+            - {name: DB_PASSWORD, valueFrom: {secretKeyRef: {name: academia-secrets, key: APP_DB_PASSWORD}}}
+            - {name: SECRET_KEY, valueFrom: {secretKeyRef: {name: academia-secrets, key: SECRET_KEY}}}
+          # liveness: processo vivo (não depende do banco -> banco fora não reinicia Pods à toa)
+          livenessProbe:
+            httpGet: {path: /health/live, port: 8000}
+            periodSeconds: 10
+            failureThreshold: 3
+          # readiness: pronto para tráfego (inclui conexão com o banco)
+          readinessProbe:
+            httpGet: {path: /health/ready, port: 8000}
+            periodSeconds: 5
+            failureThreshold: 2
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}   # necessário para o HPA calcular % de CPU
+            limits: {cpu: 500m, memory: 256Mi}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: academia-web
+  namespace: academia-cloud
+spec:
+  selector: {app: academia-web}
+  ports: [{port: 80, targetPort: 8000}]
+---
+# HPA: escala de 2 a 6 réplicas quando a CPU média passar de 70% do request.
+# Pré-requisito: metrics-server instalado no cluster.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: academia-web
+  namespace: academia-cloud
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: academia-web}
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+---
+# Ingress: entrada HTTPS. Pré-requisito: um Ingress Controller (ex.: ingress-nginx)
+# e um certificado (ex.: cert-manager) no Secret academia-tls.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: academia
+  namespace: academia-cloud
+spec:
+  tls: [{hosts: [academia.example.test], secretName: academia-tls}]
+  rules:
+    - host: academia.example.test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: {service: {name: academia-web, port: {number: 80}}}

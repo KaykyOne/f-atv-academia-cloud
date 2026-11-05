@@ -1,0 +1,62 @@
+# Serviço de notificações e publicador da outbox (Grupo 2).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: academia-notificacoes
+  namespace: academia-cloud
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: academia-notificacoes}
+  template:
+    metadata:
+      labels: {app: academia-notificacoes}
+    spec:
+      containers:
+        - name: notificacoes
+          image: academia-cloud:2.0
+          command: ["gunicorn", "--bind", "0.0.0.0:8001", "--workers", "1", "app.wsgi_notificacoes:app"]
+          ports: [{containerPort: 8001}]
+          envFrom: [{configMapRef: {name: academia-config}}]
+          env:
+            - {name: DB_USER, valueFrom: {secretKeyRef: {name: academia-secrets, key: NOTIF_DB_USER}}}
+            - {name: DB_PASSWORD, valueFrom: {secretKeyRef: {name: academia-secrets, key: NOTIF_DB_PASSWORD}}}
+          readinessProbe: {httpGet: {path: /health/ready, port: 8001}, periodSeconds: 10}
+          livenessProbe: {httpGet: {path: /health/live, port: 8001}, periodSeconds: 10}
+          resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 128Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: academia-notificacoes
+  namespace: academia-cloud
+spec:
+  selector: {app: academia-notificacoes}
+  ports: [{port: 8001, targetPort: 8001}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: academia-publicador
+  namespace: academia-cloud
+spec:
+  replicas: 1      # pode ter mais: SELECT ... FOR UPDATE SKIP LOCKED evita envio em dobro
+  selector:
+    matchLabels: {app: academia-publicador}
+  template:
+    metadata:
+      labels: {app: academia-publicador}
+    spec:
+      containers:
+        - name: publicador
+          image: academia-cloud:2.0
+          command: ["python", "-m", "app.publicador"]
+          envFrom: [{configMapRef: {name: academia-config}}]
+          env:
+            - {name: DB_USER, valueFrom: {secretKeyRef: {name: academia-secrets, key: APP_DB_USER}}}
+            - {name: DB_PASSWORD, valueFrom: {secretKeyRef: {name: academia-secrets, key: APP_DB_PASSWORD}}}
+          livenessProbe:
+            exec: {command: ["python", "-c", "import os,time,sys; sys.exit(time.time()-os.path.getmtime('/tmp/publicador.heartbeat')>30)"]}
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 128Mi}}

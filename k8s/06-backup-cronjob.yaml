@@ -1,0 +1,44 @@
+# Backup diário às 03:00 UTC (Grupo 5). Grava em um PVC próprio; em nuvem, o
+# passo seguinte seria copiar o arquivo para object storage em OUTRA região.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: academia-backups
+  namespace: academia-cloud
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 5Gi}}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: academia-backup
+  namespace: academia-cloud
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: pg-dump
+              image: postgres:17-alpine
+              command:
+                - sh
+                - -c
+                - >-
+                  set -eo pipefail;
+                  f=/backups/academia_$(date -u +%Y%m%dT%H%M%SZ).sql.gz;
+                  pg_dump --clean --if-exists --no-owner | gzip > "$f" && gzip -t "$f";
+                  ls -1t /backups/academia_*.sql.gz | tail -n +15 | xargs -r rm -f
+              env:
+                - {name: PGHOST, value: academia-db}
+                - {name: PGDATABASE, value: academia}
+                - {name: PGUSER, valueFrom: {secretKeyRef: {name: academia-secrets, key: POSTGRES_ADMIN_USER}}}
+                - {name: PGPASSWORD, valueFrom: {secretKeyRef: {name: academia-secrets, key: POSTGRES_ADMIN_PASSWORD}}}
+              volumeMounts: [{name: backups, mountPath: /backups}]
+          volumes: [{name: backups, persistentVolumeClaim: {claimName: academia-backups}}]

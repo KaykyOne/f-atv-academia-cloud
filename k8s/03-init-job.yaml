@@ -1,0 +1,26 @@
+# Job = equivalente ao serviço `init` do Compose: roda até terminar com código 0.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: academia-init
+  namespace: academia-cloud
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: init
+          image: academia-cloud:2.0          # em nuvem: registry/academia-cloud:2.0 (Grupo 1)
+          command: ["python", "-m", "app.init_db"]
+          envFrom: [{configMapRef: {name: academia-config}}]
+          env:
+            - {name: DB_USER, valueFrom: {secretKeyRef: {name: academia-secrets, key: POSTGRES_ADMIN_USER}}}
+            - {name: DB_PASSWORD, valueFrom: {secretKeyRef: {name: academia-secrets, key: POSTGRES_ADMIN_PASSWORD}}}
+            - {name: APP_DB_USER, valueFrom: {secretKeyRef: {name: academia-secrets, key: APP_DB_USER}}}
+            - {name: APP_DB_PASSWORD, valueFrom: {secretKeyRef: {name: academia-secrets, key: APP_DB_PASSWORD}}}
+            - {name: NOTIF_DB_USER, valueFrom: {secretKeyRef: {name: academia-secrets, key: NOTIF_DB_USER}}}
+            - {name: NOTIF_DB_PASSWORD, valueFrom: {secretKeyRef: {name: academia-secrets, key: NOTIF_DB_PASSWORD}}}
+            - {name: ADMIN_PASSWORD, valueFrom: {secretKeyRef: {name: academia-secrets, key: ADMIN_PASSWORD}}}
+            - {name: SECRETARIA_PASSWORD, valueFrom: {secretKeyRef: {name: academia-secrets, key: SECRETARIA_PASSWORD}}}
+            - {name: PROFESSOR_PASSWORD, valueFrom: {secretKeyRef: {name: academia-secrets, key: PROFESSOR_PASSWORD}}}

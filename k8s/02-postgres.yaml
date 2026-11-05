@@ -1,0 +1,48 @@
+# PostgreSQL de LABORATÓRIO dentro do cluster: 1 réplica = ponto único de falha.
+# Em produção, trocar por banco gerenciado com réplica em outra zona (ver docs/ARQUITETURA.md).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: academia-db
+  namespace: academia-cloud
+spec:
+  serviceName: academia-db
+  replicas: 1
+  selector:
+    matchLabels: {app: academia-db}
+  template:
+    metadata:
+      labels: {app: academia-db}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          ports: [{containerPort: 5432}]
+          env:
+            - {name: POSTGRES_DB, valueFrom: {configMapKeyRef: {name: academia-config, key: DB_NAME}}}
+            - {name: POSTGRES_USER, valueFrom: {secretKeyRef: {name: academia-secrets, key: POSTGRES_ADMIN_USER}}}
+            - {name: POSTGRES_PASSWORD, valueFrom: {secretKeyRef: {name: academia-secrets, key: POSTGRES_ADMIN_PASSWORD}}}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+          readinessProbe:
+            exec: {command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]}
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {memory: 512Mi}
+          volumeMounts:
+            - {name: dados, mountPath: /var/lib/postgresql/data}
+  # PersistentVolumeClaim: equivalente ao named volume `dados_postgres` (Grupo 5).
+  volumeClaimTemplates:
+    - metadata: {name: dados}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 5Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: academia-db
+  namespace: academia-cloud
+spec:
+  selector: {app: academia-db}
+  ports: [{port: 5432, targetPort: 5432}]

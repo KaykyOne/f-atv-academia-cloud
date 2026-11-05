@@ -1,0 +1,18 @@
+# PROPOSTA (Grupo 4) - não executada em cluster neste projeto. Ver k8s/README.md.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: academia-cloud
+---
+# ConfigMap: configuração NÃO sensível (equivale às variáveis do compose.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: academia-config
+  namespace: academia-cloud
+data:
+  DB_HOST: academia-db          # nome do Service do PostgreSQL (DNS interno do cluster)
+  DB_PORT: "5432"
+  DB_NAME: academia
+  NOTIF_URL: http://academia-notificacoes:8001
+  COOKIE_SECURE: "true"         # no cluster o tráfego externo chega por HTTPS (Ingress)
