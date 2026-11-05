@@ -1,152 +1,163 @@
-# AcademiaCloud — estudo de caso de Docker e Computação em Nuvem
+# AcademiaCloud: projeto integrado (Docker + Computação em Nuvem)
 
-Aplicação acadêmica didática com interface em português, API HTTP e PostgreSQL.
-Tecnologias: Python 3.12, Flask, SQLAlchemy, Gunicorn, PostgreSQL 17 e Docker Compose v2.
-A escolha de Python reduz a configuração necessária: os alunos podem concentrar o estudo na infraestrutura, mesmo sem alterar o backend.
+Esta é a base AcademiaCloud com as contribuições dos **seis grupos** do seminário já implementadas e funcionando juntas:
+
+| Grupo | Tema | O que foi implementado | Documento |
+|---|---|---|---|
+| 1 | Imagens | Dockerfile multi-stage com estágio de testes, usuário não root, cache de camadas e comparação com a imagem original | [docs/GRUPO1_IMAGENS.md](docs/GRUPO1_IMAGENS.md) |
+| 2 | Serviços e redes | Compose com 8 serviços, DNS interno, outbox transacional, publicador e serviço de notificações idempotente | [docs/GRUPO2_SERVICOS.md](docs/GRUPO2_SERVICOS.md) |
+| 3 | Segurança | Login com perfis (admin, secretaria e professor), contas do banco com menor privilégio, Docker secrets, auditoria, bloqueio de força bruta e cabeçalhos de segurança | [docs/GRUPO3_SEGURANCA.md](docs/GRUPO3_SEGURANCA.md) |
+| 4 | Escalabilidade | 2 réplicas atrás de um balanceador Nginx, failover demonstrável e manifests Kubernetes | [docs/GRUPO4_ESCALABILIDADE.md](docs/GRUPO4_ESCALABILIDADE.md) |
+| 5 | Backup e recuperação | Volume nomeado, backup automático com retenção e SHA-256, e teste de restauração isolado com medição do RTO | [docs/GRUPO5_BACKUP.md](docs/GRUPO5_BACKUP.md) |
+| 6 | Diagnóstico e custos | Script de diagnóstico, limites de CPU e memória, retenção de logs, auditoria e modelo de custos e governança | [docs/GRUPO6_DIAGNOSTICO_CUSTOS.md](docs/GRUPO6_DIAGNOSTICO_CUSTOS.md) |
+
+Arquitetura e diagramas: [docs/ARQUITETURA.md](docs/ARQUITETURA.md). Validação executada: [docs/VALIDACAO.md](docs/VALIDACAO.md).
+
+```
+navegador ──► lb (Nginx :8080) ──► web ×2 ──────────► db (PostgreSQL 17, volume dados_postgres)
+                                     │ outbox            ▲          ▲
+                                     ▼                   │          │
+                                publicador ──► notificacoes         │
+                                backup (pg_dump periódico) ─────────┴──► ./backups
+```
 
 ## 1. Executar
 
-Instale previamente Docker Engine/Desktop e Docker Compose v2. Extraia o ZIP e abra o terminal dentro da pasta AcademiaCloud.
+Pré-requisitos: Docker Engine ou Docker Desktop, e Docker Compose v2.
 
-Linux/macOS:
+**1) Criar o `.env` com senhas aleatórias:**
+
+Linux, macOS ou WSL:
 ```sh
-cp .env.example .env
+sh scripts/gerar-env.sh
 ```
-Windows PowerShell:
+Windows PowerShell (copie e edite manualmente, trocando **todas** as senhas):
 ```powershell
 Copy-Item .env.example .env
+notepad .env
 ```
-Edite `.env` e substitua as duas senhas. Nesta base, use senhas longas alfanuméricas: caracteres reservados em URLs exigiriam codificação na DATABASE_URL.
 
+**2) Subir:**
 ```sh
 docker compose up -d --build
 docker compose ps -a
-docker compose logs init web
 ```
-A primeira execução precisa de internet para baixar imagens e dependências.
-Abra **http://localhost:8080**. Há dois alunos e duas disciplinas fictícias. Cadastre uma matrícula para observar as relações.
-O serviço `init` terminar com código 0 é normal: ele cria as tabelas e dados iniciais, antes de iniciar a aplicação. Ele não apaga registros existentes.
+Resultado esperado: `db`, `web-1`, `web-2`, `lb`, `notificacoes` e `publicador` ficam *healthy*, `backup` fica *Up*, e `init` termina com **`Exited (0)`**, que é o comportamento normal.
 
-Para encerrar, preservando os dados:
-```sh
-docker compose down
-```
-Para iniciar novamente:
-```sh
-docker compose up -d
-```
-**`docker compose down -v` apaga os volumes e todos os dados deste projeto.** Não é necessário para uso normal. Alterar POSTGRES_PASSWORD no .env não altera automaticamente a senha de um banco já inicializado.
+**3) Acessar http://localhost:8080** e entrar com um dos usuários abaixo. As senhas são as definidas no `.env`.
 
-## 2. pgAdmin opcional
-
-```sh
-docker compose --profile admin up -d
-```
-Abra http://localhost:5050 e entre com PGADMIN_EMAIL / PGADMIN_PASSWORD do `.env`.
-Em Register > Server, informe:
-- Name: AcademiaCloud
-- Host: db (DNS interno da rede Docker)
-- Port: 5432
-- Maintenance database: academia (ou POSTGRES_DB do .env)
-- Username e Password: POSTGRES_USER e POSTGRES_PASSWORD do .env
-
-O PostgreSQL não publica porta no computador. A aplicação e o pgAdmin conectam-se por `db:5432` dentro da rede.
-
-## 3. Funcionalidades
-
-- Cadastro, listagem e exclusão de alunos e disciplinas.
-- Matrícula e cancelamento, com bloqueio de duplicidade.
-- Exclusão de aluno ou disciplina vinculados é bloqueada até remover as matrículas.
-- Painel com totais e identificação da instância.
-- Validação no backend, SQL parametrizado e resposta de erro sem senha/conexão.
-- Logs em stdout; endpoints de liveness e readiness.
-
-## 4. Arquitetura inicial
-
-Navegador → aplicação web/API (porta local 8080 → 8000 no container) → PostgreSQL (db:5432).
-O frontend é servido pela própria aplicação. Trata-se de **monólito containerizado**, não de microsserviços; separação futura é uma tarefa de estudo.
-`init` executa a inicialização antes do servidor. `pgadmin` é ferramenta administrativa opcional.
-Dados do banco residem em `dados_postgres`, um named volume. Cada container web é stateless.
-
-## 5. API
-
-| Método | Rota | Uso |
+| Usuário | Perfil | Pode |
 |---|---|---|
-| GET | /api/resumo | Contadores e instância |
-| GET / POST | /api/alunos | Listar / cadastrar |
-| GET / POST | /api/disciplinas | Listar / cadastrar |
-| GET / POST | /api/matriculas | Listar / matricular |
-| DELETE | /api/alunos/{id} | Excluir aluno sem vínculos |
-| DELETE | /api/disciplinas/{id} | Excluir disciplina sem vínculos |
-| DELETE | /api/matriculas/{id} | Cancelar matrícula |
-| GET | /health/live | Processo ativo |
-| GET | /health/ready | Conexão com o banco |
+| `admin` | administrador | Tudo, além dos painéis de eventos, notificações e auditoria |
+| `secretaria` | secretaria | Cadastrar e excluir alunos e matrículas |
+| `professor` | professor | Cadastrar disciplinas e consultar tudo (com o e-mail dos alunos mascarado) |
 
+**Parar sem perder dados:** `docker compose down`. **Nunca** use `docker compose down -v`, porque esse comando apaga o volume do banco.
+
+## 2. Interface (frontend)
+
+SPA em **React + TypeScript + Tailwind v4 + shadcn/ui** (componentes Radix), em [frontend/](frontend/):
+
+| Rota | Página | Perfil |
+|---|---|---|
+| `/login` | Login | público |
+| `/` | Visão geral: contadores, matrículas recentes e réplica que respondeu | todos |
+| `/alunos`, `/disciplinas`, `/matriculas` | Tabela com busca, modal de cadastro e confirmação de exclusão | todos (cadastro conforme o perfil) |
+| `/admin/eventos` | Outbox: status, tentativas e botão Reenviar (atualiza a cada 3 s) | admin |
+| `/admin/notificacoes` | Notificações simuladas | admin |
+| `/admin/auditoria` | Trilha de auditoria com filtro por resultado | admin |
+
+Sidebar com navegação filtrada por perfil, menu lateral (*sheet*) no celular, menu do usuário, toasts (Sonner) e skeletons de carregamento. O build roda no estágio `frontend` do Dockerfile (Node 22), e só os arquivos estáticos vão para a imagem final, servidos pelo Flask na mesma origem da API (sem CORS). O Flask devolve o `index.html` para qualquer rota fora de `/api` e `/health`.
+
+Desenvolvimento com hot reload (com o stack Docker rodando):
 ```sh
-curl http://localhost:8080/health/ready
-curl http://localhost:8080/api/resumo
-curl -X POST http://localhost:8080/api/alunos -H 'Content-Type: application/json' -d '{"nome":"Carla Exemplo","email":"carla@example.test"}'
+cd frontend && npm install && npm run dev     # http://localhost:5173, que redireciona /api para :8080
 ```
-PowerShell: use `curl.exe` ou `Invoke-RestMethod`.
-Status: 201 criação; 204 exclusão; 400 validação; 404 inexistente; 409 duplicidade/vínculo; 503 banco indisponível.
-Não há edição nesta versão: o escopo é cadastro, listagem e exclusão.
+Para adicionar componentes: `npx shadcn@latest add <componente>` (configuração em `frontend/components.json`).
 
-## 6. Diagnóstico
+## 3. Roteiros de demonstração (um por grupo)
+
+Os scripts são em bash (Linux, macOS, WSL ou Git Bash). Os comandos equivalentes para PowerShell estão no documento de cada grupo.
+
+| Script | Grupo | O que mostra |
+|---|---|---|
+| `bash scripts/demo-eventos.sh` | 2 | Consumidor fora do ar, evento pendente, recuperação e idempotência |
+| `bash scripts/demo-seguranca.sh` | 3 | Processo não root, secrets, menor privilégio no banco, perfis, força bruta e cabeçalhos |
+| `bash scripts/demo-balanceamento.sh` | 4 | Alternância entre réplicas, queda e retorno de uma réplica, e banco fora (503 não mascarado) |
+| `bash scripts/backup-agora.sh` | 5 | Backup imediato com conferência de SHA-256 |
+| `bash scripts/teste-restauracao.sh` | 5 | Restauração em uma cópia isolada (porta 8090) com medição do tempo |
+| `bash scripts/diagnostico.sh` | 6 | Estado, CPU e memória, limites, saúde, erro 400 no log e fila de eventos (salvos em `evidencias/`) |
+
+## 4. API
+
+| Método | Rota | Acesso |
+|---|---|---|
+| GET | `/health/live`, `/health/ready` | público |
+| GET | `/api/resumo` (contadores + instância que respondeu) | público |
+| POST | `/api/login`, `/api/logout` · GET `/api/me` | — |
+| GET | `/api/alunos`, `/api/disciplinas`, `/api/matriculas` | usuário logado |
+| POST / DELETE | `/api/alunos[/id]`, `/api/matriculas[/id]` | admin, secretaria |
+| POST / DELETE | `/api/disciplinas[/id]` | admin, professor |
+| GET | `/api/eventos`, `/api/notificacoes`, `/api/auditoria` | admin |
+| POST | `/api/eventos/{id}/reprocessar` | admin |
+
+Requisições POST e DELETE exigem `Content-Type: application/json` (proteção CSRF). Exemplo com curl:
+```sh
+curl -c c.txt -H 'Content-Type: application/json' -d '{"usuario":"admin","senha":"SENHA_DO_ENV"}' http://localhost:8080/api/login
+curl -b c.txt http://localhost:8080/api/alunos
+```
+Códigos de status: 201 criado · 204 excluído · 400 validação · 401 sem login · 403 sem permissão · 404 inexistente · 409 duplicado ou vinculado · 415 sem JSON · 429 bloqueado · 503 banco indisponível.
+
+## 5. Configuração (`.env`)
+
+| Variável | Uso |
+|---|---|
+| `POSTGRES_ADMIN_USER/PASSWORD` | Conta administrativa do banco, usada **só** pelos serviços `init` e `backup` |
+| `APP_DB_USER/PASSWORD` | Conta da aplicação: somente DML, sem DDL |
+| `NOTIF_DB_USER/PASSWORD` | Conta do serviço de notificações: só acessa o schema `notificacoes` |
+| `SECRET_KEY` | Assina o cookie de sessão. Deve ser igual em todas as réplicas |
+| `ADMIN/SECRETARIA/PROFESSOR_PASSWORD` | Senhas iniciais dos usuários, aplicadas só na primeira inicialização |
+| `APP_PORT` (8080) · `WEB_REPLICAS` (2) | Porta do balanceador e número de réplicas |
+| `BACKUP_INTERVAL_SECONDS` (86400) · `BACKUP_RETENTION` (14) | Frequência e quantidade de backups mantidos |
+| `BACKUP_UID/GID` | Dono dos arquivos criados em `./backups` |
+| `PGADMIN_*` | pgAdmin opcional: `docker compose --profile admin up -d` |
+
+As senhas chegam aos containers como **Docker secrets** (arquivos em `/run/secrets`), e não como variáveis de ambiente. Assim, aceitam qualquer caractere, porque a URL de conexão é montada com codificação.
+
+**pgAdmin:** abra http://localhost:5050 e registre um servidor com host `db`, porta `5432`, usuário `POSTGRES_ADMIN_USER` e a senha correspondente.
+
+## 6. Testes automatizados
+
+Os testes rodam dentro do estágio `test` do Dockerfile, com Python 3.12 e SQLite temporário:
+```sh
+docker build --target test -t academia-cloud:test .
+```
+São 8 testes, cobrindo o fluxo original, validações, saúde e seed, autenticação, a matriz de permissões, CSRF, força bruta, outbox, consumidor fora do ar e idempotência.
+
+## 7. Diagnóstico rápido
 
 ```sh
-docker compose logs -f web
-docker compose logs db
-docker compose exec web id
-docker compose exec web python -c "import socket; print(socket.gethostbyname('db'))"
+docker compose ps -a
+docker compose logs -f web            # Ctrl+C sai sem parar nada
+docker compose logs init publicador notificacoes backup lb
 docker stats
 ```
-Logs não registram o corpo enviado nem credenciais. `docker stats` mostra uso dos containers do computador.
-Se a porta 8080 estiver ocupada, altere APP_PORT no .env e execute `docker compose up -d`.
-Se `init` falhar, consulte os logs de init e db; confirme senhas e nome do banco.
-Readiness verifica a conexão, não a integridade de todas as tabelas.
 
-## 7. Backup e restauração (Linux/macOS ou WSL)
+| Problema | Causa provável e solução |
+|---|---|
+| `Crie o arquivo .env` | O `.env` não existe ou foi salvo como `.env.txt` |
+| `init` com Exited (1) | Veja `docker compose logs init db`. Senhas trocadas após o banco já existir não alteram a conta administrativa |
+| 502 ou 504 logo após subir | As réplicas ainda estão iniciando; aguarde o estado *healthy* |
+| Porta 8080 ocupada | Altere `APP_PORT` no `.env` e rode `docker compose up -d` |
+| `./backups` com permissão negada (Linux) | Ajuste `BACKUP_UID/GID` para a saída de `id -u` e `id -g` |
 
-Crie um backup lógico consistente usando pg_dump, em vez de copiar arquivos do banco em execução:
-```sh
-mkdir -p backups
-docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner --no-privileges' > backups/academia.sql
-```
-Confirme que o comando terminou com sucesso e que o arquivo contém SQL. Um arquivo vazio não é backup válido.
-Restauração: **substitui tabelas e dados de alunos, disciplinas e matrículas pelo conteúdo do backup**. Faça em um ambiente de laboratório separado, ou guarde um backup atual primeiro.
-```sh
-docker compose stop web
-docker compose exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < backups/academia.sql
-docker compose start web
-```
-Reabra a interface e confirme os registros. Para recuperar após perda do volume: inicie primeiro o projeto para recriar o banco vazio, depois restaure.
+## 8. Limites (o que é proposta e não está implementado)
 
-## 8. Limites da base e evolução
-
-Uso local com dados fictícios. Não há login, RBAC, TLS, gestão de secrets, Kubernetes, balanceador nem implantação em provedor. As portas são vinculadas a 127.0.0.1. Esses itens são atividades dos grupos, não funcionalidades prontas.
-Credenciais por .env são configuração de laboratório, não um mecanismo de secrets. O usuário inicial do PostgreSQL criado por POSTGRES_USER tem privilégios elevados: o grupo 3 deve separar conta administrativa e conta da aplicação.
-O Dockerfile já roda como usuário não root. Para ensinar otimização, compare uma variante básica e uma otimizada, sem alterar a base distribuída.
-Escalar `web` diretamente com a mesma porta publicada causa conflito. Grupo 4 deve retirar essa publicação por réplica e introduzir balanceador ou Kubernetes.
-Em produção, utilize migrações, conta com menor privilégio, autenticação, autorização, proteção contra abuso, TLS, backups testados e gestão segura de credenciais.
-
-## 9. Testes
-
-```sh
-python -m venv .venv
-# Linux/macOS: source .venv/bin/activate
-# PowerShell: .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python -m unittest discover -s tests -v
-```
-Por padrão, os testes usam SQLite temporário, sem alterar o banco da aplicação. Para repetir com PostgreSQL, aponte TEST_DATABASE_URL para um **banco exclusivo e vazio de testes**. O teste cria e apaga tabelas desse banco. Não use o banco de aula.
-
-## 10. Materiais
-
-- docs/SEMINARIOS.md: temas, desafios, evidências e rubrica.
-- docs/GUIA_PROFESSOR.md: condução e conferência da base.
-- docs/VALIDACAO.md: escopo da validação realizada no pacote.
-
-Referências oficiais consultadas:
-- https://docs.docker.com/compose/how-tos/startup-order/
-- https://docs.docker.com/reference/compose-file/services/
-- https://flask.palletsprojects.com/en/stable/deploying/
+- Não há TLS (HTTPS) local. O cookie `Secure` depende de `COOKIE_SECURE=true` atrás de HTTPS, que está previsto no Ingress do Kubernetes.
+- O banco é um único container, portanto continua sendo **ponto único de falha**. Réplicas web não resolvem isso; veja [docs/ARQUITETURA.md](docs/ARQUITETURA.md).
+- Tudo roda em um único host: não há alta disponibilidade de host, de zona ou de região.
+- A cópia dos backups para fora do computador (outra região) está documentada como procedimento, mas não é automática.
+- O Kubernetes está na forma de manifests revisados e **não foi executado em cluster**.
+- Não há métricas históricas nem alertas automáticos: o endpoint de saúde não é monitoramento completo.
+- Não há tela de gestão de usuários; as senhas iniciais vêm do `.env`.
+- Use somente dados fictícios.
