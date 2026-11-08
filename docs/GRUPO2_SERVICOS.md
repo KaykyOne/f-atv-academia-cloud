@@ -31,7 +31,7 @@ notificacoes -> 172.25.0.5
 $ docker network inspect academia-cloud_academia
 bridge 172.25.0.0/16
 ```
-Nenhum IP fica fixo no código. A conexão é montada a partir de `DB_HOST=db` e `DB_PORT=5432` ([app/config.py](../app/config.py)). Os containers web foram recriados durante os testes, ganharam IPs novos e tudo continuou funcionando, inclusive o Nginx, que refaz a resolução DNS a cada 5 s.
+Nenhum IP fica fixo no código. A conexão é montada a partir de `DB_HOST=db` e `DB_PORT=5432` ([app/config.py](../app/config.py)). Os containers web foram recriados durante os testes, ganharam IPs novos e tudo continuou funcionando, inclusive o Nginx, que refaz a resolução DNS a cada 2 s.
 
 ## 3. Configuração por ambiente
 

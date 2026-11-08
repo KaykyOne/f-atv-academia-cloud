@@ -13,7 +13,7 @@
 
 - O `web` não publica porta e usa `deploy.replicas: ${WEB_REPLICAS:-2}`.
 - O `lb` (Nginx 1.28) é a **única** porta publicada. Configuração em [infra/nginx/default.conf](../infra/nginx/default.conf):
-  - `server web:8000 resolve`: o DNS do Docker devolve os IPs de todas as réplicas, e `resolver ... valid=5s` atualiza a lista quando uma réplica muda de IP;
+  - `server web:8000 resolve`: o DNS do Docker devolve os IPs de todas as réplicas, e `resolver ... valid=2s` atualiza a lista quando uma réplica muda de IP;
   - `max_fails=1 fail_timeout=10s`: verificação **passiva**. Depois de uma falha de conexão, a réplica sai da rotação por 10 s;
   - `proxy_next_upstream error timeout` e `tries 2`: se a conexão falhar, a requisição vai para a outra réplica. Isso só acontece com **erro de conexão**: um `503` da aplicação não é repetido, e POST não é reenviado;
   - o cabeçalho `X-Upstream` e o campo `instancia` em `/api/resumo` mostram qual réplica respondeu.
@@ -57,7 +57,20 @@ Saída real (05/11/2026):
 - Em uma execução anterior, com timeouts diferentes, observamos **uma** resposta 504 nesse momento de transição. Por isso, não prometemos "zero erro": prometemos que o serviço continua depois que o balanceador detecta a falha.
 - Quando a réplica volta, ela retorna à rotação depois do `fail_timeout` (10 s) e da nova resolução DNS.
 
-## 4. Liveness x readiness
+## 4. Atualização sem indisponibilidade (rolling update)
+
+`docker compose up -d --build` recria **todas** as réplicas ao mesmo tempo. Medição real, com uma requisição a cada 0,2 s durante a atualização:
+
+| Método | Requisições | Erros 502 | Janela de erro |
+|---|---|---|---|
+| `docker compose up -d --force-recreate web` | 150 | 25 | 5,3 s |
+| `bash scripts/atualizar-sem-parada.sh` | 200 | **0** | — |
+
+O script [scripts/atualizar-sem-parada.sh](../scripts/atualizar-sem-parada.sh) sobe as réplicas novas **ao lado** das antigas, espera o healthcheck `/health/ready` ficar `healthy` e só então remove as antigas. Se as novas não ficarem saudáveis, ele as descarta e mantém as antigas (rollback). É a mesma ideia do `rollingUpdate: {maxSurge: 1, maxUnavailable: 0}` do Deployment em [k8s/04-web.yaml](../k8s/04-web.yaml), que no Kubernetes é automático.
+
+Reduzir o `valid` do DNS do Nginx de 5 s para 2 s, sozinho, **não** resolveu: o problema era não haver nenhuma réplica viva durante a recriação.
+
+## 5. Liveness x readiness
 
 | Endpoint | Pergunta | Quem usa |
 |---|---|---|
@@ -73,7 +86,7 @@ Se a liveness verificasse o banco, uma queda do banco faria o Kubernetes reinici
 | Verificação passiva do Nginx | Tira a réplica da rotação depois de uma falha de conexão |
 | Kubernetes (Deployment + probes) | Recria Pods, remove do Service os que não estão Ready e redistribui entre nós |
 
-## 5. Kubernetes (proposta, NÃO executada)
+## 6. Kubernetes (proposta, NÃO executada)
 
 Os manifests comentados estão em [k8s/](../k8s/), com instruções em [k8s/README.md](../k8s/README.md).
 
@@ -90,7 +103,7 @@ Os manifests comentados estão em [k8s/](../k8s/), com instruções em [k8s/READ
 
 Dois Pods no **mesmo nó** não sobrevivem à queda desse nó.
 
-## 6. Comparações
+## 7. Comparações
 
 | | |
 |---|---|

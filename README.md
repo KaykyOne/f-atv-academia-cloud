@@ -83,6 +83,7 @@ Os scripts são em bash (Linux, macOS, WSL ou Git Bash). Os comandos equivalente
 |---|---|---|
 | `bash scripts/demo-eventos.sh` | 2 | Consumidor fora do ar, evento pendente, recuperação e idempotência |
 | `bash scripts/demo-seguranca.sh` | 3 | Processo não root, secrets, menor privilégio no banco, perfis, força bruta e cabeçalhos |
+| `bash scripts/atualizar-sem-parada.sh` | 4 | Atualização gradual (rolling update) das réplicas web, sem respostas 502 |
 | `bash scripts/demo-balanceamento.sh` | 4 | Alternância entre réplicas, queda e retorno de uma réplica, e banco fora (503 não mascarado) |
 | `bash scripts/backup-agora.sh` | 5 | Backup imediato com conferência de SHA-256 |
 | `bash scripts/teste-restauracao.sh` | 5 | Restauração em uma cópia isolada (porta 8090) com medição do tempo |

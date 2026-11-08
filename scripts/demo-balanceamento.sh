@@ -20,7 +20,7 @@ contar 6
 echo "-> O Nginx marca a réplica como indisponível após a falha de conexão (max_fails=1) e repete a requisição na outra (proxy_next_upstream)."
 titulo "4. Restaurando a réplica"
 passo "docker start $NOME"; docker start "$NOME" >/dev/null
-echo "aguardando fail_timeout (10 s) + nova resolução DNS (5 s)..."; sleep 16
+echo "aguardando fail_timeout (10 s) + nova resolução DNS (2 s)..."; sleep 13
 contar 6
 titulo "5. Banco indisponível NÃO é mascarado pelo balanceador"
 passo "docker compose stop db"; docker compose stop db >/dev/null 2>&1
